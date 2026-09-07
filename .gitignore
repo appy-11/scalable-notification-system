@@ -29,3 +29,9 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# AI coding-agent local configuration
+.agents/
+.claude/
+.cursor/
+.devin/
