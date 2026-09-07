@@ -1,0 +1,144 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  PUSH
+}
+
+enum NotificationCategory {
+  TRANSACTIONAL
+  MARKETING
+  SECURITY
+  SYSTEM
+}
+
+enum NotificationStatus {
+  PENDING
+  QUEUED
+  PROCESSING
+  SUCCEEDED
+  RETRYING
+  FAILED
+  CANCELLED
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String?  @unique
+  phone     String?  @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  notifications Notification[]
+  preferences   NotificationPreference[]
+}
+
+model Template {
+  id        String               @id @default(uuid())
+  name      String               @unique
+  channel   NotificationChannel
+  category  NotificationCategory
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  versions TemplateVersion[]
+
+  @@index([channel, category])
+}
+
+model TemplateVersion {
+  id         String   @id @default(uuid())
+  templateId String
+  version    Int
+  subject    String?
+  body       String
+  schema     Json?
+  createdAt  DateTime @default(now())
+
+  template      Template       @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  notifications Notification[]
+
+  @@unique([templateId, version])
+}
+
+model Notification {
+  id              String               @id @default(uuid())
+  userId          String
+  channel         NotificationChannel
+  category        NotificationCategory
+  templateId      String
+  templateVersion Int
+  status          NotificationStatus   @default(PENDING)
+  priority        Int                  @default(0)
+
+  scheduledAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user               User            @relation(fields: [userId], references: [id])
+  templateVersionRef TemplateVersion @relation(fields: [templateId, templateVersion], references: [templateId, version])
+  attempts           NotificationAttempt[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([scheduledAt])
+}
+
+model NotificationAttempt {
+  id             String   @id @default(uuid())
+  notificationId String
+
+  attemptNumber Int
+  provider      String
+  status        String
+
+  providerMessageId String?
+  errorCode         String?
+  errorMessage      String?
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, attemptNumber])
+  @@index([notificationId])
+}
+
+model NotificationPreference {
+  id       String               @id @default(uuid())
+  userId   String
+  category NotificationCategory
+  channel  NotificationChannel
+  enabled  Boolean              @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, category, channel])
+}
+
+model OutboxEvent {
+  id            String   @id @default(uuid())
+  aggregateType String
+  aggregateId   String
+  eventType     String
+  payload       Json
+
+  publishedAt DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([publishedAt])
+  @@index([aggregateType, aggregateId])
+}
