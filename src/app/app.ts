@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import { prisma } from "../infrastructure/database/prisma.js";
+import { notificationRoutes } from "../modules/notifications/notification.routes.js";
 
 export function buildApp() {
   const app = Fastify({
@@ -20,6 +21,8 @@ export function buildApp() {
       database: "connected",
     };
   });
+
+  app.register(notificationRoutes);
 
   return app;
 }
