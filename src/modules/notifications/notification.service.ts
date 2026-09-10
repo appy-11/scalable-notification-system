@@ -1,12 +1,57 @@
 import { prisma } from "../../infrastructure/database/prisma.js";
 import { AppError } from "../../shared/errors/app-error.js";
+import { hashObject } from "../../shared/utils/hash.js";
 import type { Prisma } from "../../generated/prisma/client.js";
 
 import type { CreateNotificationInput } from "./notification.schema.js";
 
-export async function createNotification(input: CreateNotificationInput) {
+export async function createNotification(
+  input: CreateNotificationInput,
+  idempotencyKey: string,
+) {
+  const requestHash = hashObject(input);
+
   /*
-   * 1. Validate scheduled time.
+   * Check whether this idempotency key was already used.
+   */
+  const existing = await prisma.idempotencyRecord.findUnique({
+    where: {
+      key: idempotencyKey,
+    },
+  });
+
+  if (existing) {
+    if (existing.requestHash !== requestHash) {
+      throw new AppError(
+        "IDEMPOTENCY_KEY_REUSED",
+        "Idempotency-Key was already used with a different request",
+        409,
+      );
+    }
+
+    const existingNotification = await prisma.notification.findUnique({
+      where: {
+        id: existing.notificationId,
+      },
+    });
+
+    if (!existingNotification) {
+      throw new AppError(
+        "IDEMPOTENCY_RECORD_INVALID",
+        "Idempotency record references a missing notification",
+        500,
+      );
+    }
+
+    return existingNotification;
+  }
+
+  /*
+   * Business validation.
+   */
+
+  /**
+   * Validate scheduled time.
    */
   if (input.scheduledAt && input.scheduledAt <= new Date()) {
     throw new AppError(
@@ -108,39 +153,63 @@ export async function createNotification(input: CreateNotificationInput) {
   }
 
   /*
-   * 8. Create Notification + OutboxEvent atomically.
+   * Critical transaction:
+   *
+   * IdempotencyRecord
+   * Notification
+   * OutboxEvent
+   *
+   * all commit together.
    */
-  const notification = await prisma.$transaction(async (tx) => {
-    const createdNotification = await tx.notification.create({
-      data: {
-        userId: input.userId,
-        channel: input.channel,
-        category: input.category,
-        templateId: input.templateId,
-        templateVersion: input.templateVersion,
-        data: input.data as Prisma.InputJsonObject,
-        priority: input.priority,
-        scheduledAt: input.scheduledAt ?? null,
-        status: "PENDING",
-      },
-    });
-
-    await tx.outboxEvent.create({
-      data: {
-        aggregateType: "Notification",
-        aggregateId: createdNotification.id,
-        eventType: "NotificationCreated",
-        payload: {
-          notificationId: createdNotification.id,
-          userId: createdNotification.userId,
-          channel: createdNotification.channel,
-          category: createdNotification.category,
+  try {
+    const notification = await prisma.$transaction(async (tx) => {
+      const createdNotification = await tx.notification.create({
+        data: {
+          userId: input.userId,
+          channel: input.channel,
+          category: input.category,
+          templateId: input.templateId,
+          templateVersion: input.templateVersion,
+          data: input.data as Prisma.InputJsonObject,
+          priority: input.priority,
+          scheduledAt: input.scheduledAt ?? null,
+          status: "PENDING",
         },
-      },
+      });
+
+      await tx.idempotencyRecord.create({
+        data: {
+          key: idempotencyKey,
+          requestHash,
+          notificationId: createdNotification.id,
+        },
+      });
+
+      await tx.outboxEvent.create({
+        data: {
+          aggregateType: "Notification",
+          aggregateId: createdNotification.id,
+          eventType: "NotificationCreated",
+          payload: {
+            notificationId: createdNotification.id,
+            userId: createdNotification.userId,
+            channel: createdNotification.channel,
+            category: createdNotification.category,
+          },
+        },
+      });
+
+      return createdNotification;
     });
 
-    return createdNotification;
-  });
-
-  return notification;
+    return notification;
+  } catch (error) {
+    /*
+     * Another request may have won the race and inserted
+     * the same idempotency key.
+     *
+     * We'll handle the exact Prisma error more cleanly later.
+     */
+    throw error;
+  }
 }

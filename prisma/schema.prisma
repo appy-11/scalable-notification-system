@@ -143,3 +143,15 @@ model OutboxEvent {
   @@index([publishedAt])
   @@index([aggregateType, aggregateId])
 }
+
+model IdempotencyRecord {
+  id             String   @id @default(uuid())
+  key            String   @unique
+  requestHash    String
+  notificationId String
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime?
+
+  @@index([notificationId])
+  @@index([expiresAt])
+}
