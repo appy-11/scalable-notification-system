@@ -8,6 +8,8 @@
  *  The rendered notification is logged for debugging purposes.
  */
 import { prisma } from "../../infrastructure/database/prisma.js";
+import { AppError } from "../../shared/errors/app-error.js";
+import { getNotificationProvider } from "./providers/provider.factory.js";
 import { renderTemplate } from "./template-renderer.js";
 
 export async function processNotification(notificationId: string) {
@@ -64,6 +66,32 @@ export async function processNotification(notificationId: string) {
     channel: notification.channel,
     subject: rendered.subject,
     body: rendered.body,
+  });
+
+  // Get the appropriate notification provider based on the channel (EMAIL, SMS, or PUSH).
+  const provider = getNotificationProvider(notification.channel);
+
+  const recipient = notification.user.email;
+
+  if (!recipient) {
+    throw new AppError(
+      "RECIPIENT_NOT_FOUND",
+      "User does not have an email address",
+      400,
+    );
+  }
+
+  // Send the notification using the provider.
+  const sendResult = await provider.send({
+    recipient,
+    subject: rendered.subject,
+    body: rendered.body,
+  });
+
+  // Log the result of sending the notification for debugging purposes.
+  console.log("Notification delivered", {
+    notificationId: notification.id,
+    providerMessageId: sendResult.providerMessageId,
   });
 
   return {
