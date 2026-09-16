@@ -9,14 +9,15 @@
  */
 import { prisma } from "../../infrastructure/database/prisma.js";
 import { AppError } from "../../shared/errors/app-error.js";
-import { getNotificationProvider } from "./providers/provider.factory.js";
+
 import { renderTemplate } from "./template-renderer.js";
+import { getNotificationProvider } from "./providers/provider.factory.js";
 
 export async function processNotification(notificationId: string) {
   // Atomically claim the notification.
   //why updateMany? Because we want to ensure that only one worker can claim the notification for processing.
   // If another worker has already claimed it, the update will not affect any rows, and we can safely ignore it.
-  const result = await prisma.notification.updateMany({
+  const claimResult = await prisma.notification.updateMany({
     where: {
       id: notificationId,
       status: "PENDING",
@@ -27,7 +28,7 @@ export async function processNotification(notificationId: string) {
   });
 
   // Another worker already claimed or processed it.
-  if (result.count === 0) {
+  if (claimResult.count === 0) {
     console.log(
       `Notification ${notificationId} was already claimed or processed`,
     );
@@ -54,48 +55,113 @@ export async function processNotification(notificationId: string) {
     return null;
   }
 
-  // Render the notification template with the provided data.
-  const rendered = renderTemplate(
-    notification.templateVersionRef.body,
-    notification.templateVersionRef.subject,
-    notification.data,
-  );
+  // Record the start time of the processing attempt.
+  const startedAt = new Date();
 
-  console.log("Notification rendered", {
-    notificationId: notification.id,
-    channel: notification.channel,
-    subject: rendered.subject,
-    body: rendered.body,
+  // Find the next attempt number.
+  const lastAttempt = await prisma.notificationAttempt.findFirst({
+    where: {
+      notificationId: notification.id,
+    },
+    orderBy: {
+      attemptNumber: "desc",
+    },
   });
 
-  // Get the appropriate notification provider based on the channel (EMAIL, SMS, or PUSH).
-  const provider = getNotificationProvider(notification.channel);
+  // Increment the attempt number for the new processing attempt.
+  const attemptNumber = (lastAttempt?.attemptNumber ?? 0) + 1;
 
-  const recipient = notification.user.email;
-
-  if (!recipient) {
-    throw new AppError(
-      "RECIPIENT_NOT_FOUND",
-      "User does not have an email address",
-      400,
+  // Process the notification by rendering the template and
+  // sending it via the appropriate provider.
+  try {
+    const rendered = renderTemplate(
+      notification.templateVersionRef.body,
+      notification.templateVersionRef.subject,
+      notification.data,
     );
+
+    console.log("Notification rendered", {
+      notificationId: notification.id,
+      subject: rendered.subject,
+      body: rendered.body,
+    });
+
+    // Get the appropriate notification provider based on the channel (EMAIL, SMS, or PUSH).
+    const provider = getNotificationProvider(notification.channel);
+
+    let recipient: string | null = null;
+
+    switch (notification.channel) {
+      case "EMAIL":
+        recipient = notification.user.email;
+        break;
+
+      case "SMS":
+        recipient = notification.user.phone;
+        break;
+
+      case "PUSH":
+        break;
+    }
+
+    if (!recipient) {
+      throw new AppError(
+        "RECIPIENT_NOT_FOUND",
+        `No recipient found for ${notification.channel}`,
+        400,
+      );
+    }
+
+    // Send the notification using the provider and record the result.
+    const providerResult = await provider.send({
+      recipient,
+      subject: rendered.subject,
+      body: rendered.body,
+    });
+
+    // Record the completion time of the processing attempt.
+    const completedAt = new Date();
+
+    // Use a transaction to ensure that both the notification attempt
+    // and the notification status update are atomic.
+    await prisma.$transaction([
+      prisma.notificationAttempt.create({
+        data: {
+          notificationId: notification.id,
+          attemptNumber,
+          provider: "mock-email",
+          status: "SUCCEEDED",
+          providerMessageId: providerResult.providerMessageId,
+          startedAt,
+          completedAt,
+        },
+      }),
+
+      prisma.notification.update({
+        where: {
+          id: notification.id,
+        },
+        data: {
+          status: "SUCCEEDED",
+        },
+      }),
+    ]);
+
+    // Log the successful delivery of the notification for debugging purposes.
+    console.log("Notification delivered", {
+      notificationId: notification.id,
+      attemptNumber,
+      providerMessageId: providerResult.providerMessageId,
+    });
+
+    return notification;
+  } catch (error) {
+    console.error("Notification processing failed", {
+      notificationId: notification.id,
+      attemptNumber,
+      error,
+    });
+
+    throw error;
   }
-
-  // Send the notification using the provider.
-  const sendResult = await provider.send({
-    recipient,
-    subject: rendered.subject,
-    body: rendered.body,
-  });
-
-  // Log the result of sending the notification for debugging purposes.
-  console.log("Notification delivered", {
-    notificationId: notification.id,
-    providerMessageId: sendResult.providerMessageId,
-  });
-
-  return {
-    notification,
-    rendered,
-  };
 }
