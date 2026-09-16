@@ -1,3 +1,6 @@
+/**
+ * This is the notification routes module. It is responsible for defining the HTTP routes related to notifications.
+ */
 import type { FastifyInstance } from "fastify";
 
 import { createNotificationController } from "./notification.controller.js";

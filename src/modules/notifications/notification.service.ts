@@ -1,3 +1,9 @@
+/**
+ * This is the notification service module. It is responsible for handling the business logic related to notifications.
+ * It provides a function to create notifications, which includes validation of the input data, checking for idempotency, and creating the notification in the database.
+ * The service ensures that the notification is created only if all business rules are satisfied, such as user existence, template validity, and user preferences.
+ * It also handles the creation of related records, such as idempotency records and outbox events, within a single transaction to ensure data consistency.
+ */
 import { prisma } from "../../infrastructure/database/prisma.js";
 import { AppError } from "../../shared/errors/app-error.js";
 import { hashObject } from "../../shared/utils/hash.js";
@@ -5,6 +11,12 @@ import type { Prisma } from "../../generated/prisma/client.js";
 
 import type { CreateNotificationInput } from "./notification.schema.js";
 
+/**
+ * Creates a new notification after validating the input and checking for idempotency.
+ * @param input The notification data to create.
+ * @param idempotencyKey The key to check for idempotency.
+ * @returns The created notification.
+ */
 export async function createNotification(
   input: CreateNotificationInput,
   idempotencyKey: string,
