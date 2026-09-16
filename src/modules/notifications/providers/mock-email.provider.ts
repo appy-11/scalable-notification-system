@@ -5,6 +5,8 @@
  */
 import { randomUUID } from "node:crypto";
 
+import { ProviderError } from "./provider-error.js";
+
 import type {
   NotificationProvider,
   SendNotificationInput,
@@ -13,6 +15,27 @@ import type {
 
 export class MockEmailProvider implements NotificationProvider {
   async send(input: SendNotificationInput): Promise<SendNotificationResult> {
+    /**
+     * These special recipient values are used to simulate provider
+     * failures locally so that retry and failure handling can be
+     * tested without depending on a real email provider.
+     */
+    if (input.recipient === "retry@example.com") {
+      throw new ProviderError(
+        "PROVIDER_TIMEOUT",
+        "Mock provider timed out",
+        true,
+      );
+    }
+
+    if (input.recipient === "fail@example.com") {
+      throw new ProviderError(
+        "INVALID_RECIPIENT",
+        "Mock provider rejected the recipient",
+        false,
+      );
+    }
+
     const providerMessageId = `mock-email-${randomUUID()}`;
 
     console.log("Mock email sent", {

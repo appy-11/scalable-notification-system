@@ -10,6 +10,8 @@
 import { prisma } from "../../infrastructure/database/prisma.js";
 import { AppError } from "../../shared/errors/app-error.js";
 
+import { MAX_NOTIFICATION_ATTEMPTS } from "./retry.js";
+import { ProviderError } from "./providers/provider-error.js";
 import { renderTemplate } from "./template-renderer.js";
 import { getNotificationProvider } from "./providers/provider.factory.js";
 
@@ -162,6 +164,54 @@ export async function processNotification(notificationId: string) {
       error,
     });
 
-    throw error;
+    const isProviderError = error instanceof ProviderError;
+
+    const retryable = isProviderError && error.retryable;
+
+    const hasAttemptsRemaining = attemptNumber < MAX_NOTIFICATION_ATTEMPTS;
+
+    // Record the failed attempt and determine the final notification status.
+    const nextStatus =
+      retryable && hasAttemptsRemaining ? "RETRYING" : "FAILED";
+
+    await prisma.$transaction([
+      prisma.notificationAttempt.create({
+        data: {
+          notificationId: notification.id,
+          attemptNumber,
+          provider: "mock-email",
+          status: nextStatus,
+          errorCode: isProviderError ? error.code : "UNKNOWN_ERROR",
+          errorMessage:
+            error instanceof Error
+              ? error.message
+              : "Unknown notification processing error",
+          startedAt,
+          completedAt: new Date(),
+        },
+      }),
+
+      prisma.notification.update({
+        where: {
+          id: notification.id,
+        },
+        data: {
+          status: nextStatus,
+        },
+      }),
+    ]);
+
+    console.log("Notification failure recorded", {
+      notificationId: notification.id,
+      attemptNumber,
+      status: nextStatus,
+      retryable,
+      hasAttemptsRemaining,
+    });
+
+    // The Kafka consumer should acknowledge the message after the
+    // failure has been persisted. The retry scheduling mechanism
+    // will be added in the next step.
+    return null;
   }
 }
