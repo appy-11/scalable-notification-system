@@ -5,14 +5,11 @@
  */
 import "dotenv/config";
 
-import { kafkaProducer } from "../infrastructure/kafka/kafka.js";
 import { scheduleRetries } from "../modules/notifications/retry.scheduler.js";
 
 const RETRY_INTERVAL_MS = 1000;
 
 async function start() {
-  await kafkaProducer.connect();
-
   console.log("Retry scheduler started");
 
   const run = async () => {
@@ -30,8 +27,6 @@ async function start() {
 
 async function shutdown() {
   console.log("Shutting down retry scheduler...");
-
-  await kafkaProducer.disconnect();
 
   process.exit(0);
 }
