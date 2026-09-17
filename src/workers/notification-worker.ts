@@ -47,7 +47,10 @@ async function processMessage({
     event,
   });
 
-  if (event.eventType !== "NotificationCreated") {
+  if (
+    event.eventType !== "NotificationCreated" &&
+    event.eventType !== "NotificationRetry"
+  ) {
     console.log(`Ignoring unsupported event type: ${event.eventType}`);
 
     return;

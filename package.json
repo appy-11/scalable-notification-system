@@ -7,6 +7,7 @@
     "dev": "tsx watch src/server.ts",
     "dev:publisher": "tsx watch src/workers/outbox-publisher.ts",
     "dev:worker": "tsx watch src/workers/notification-worker.ts",
+    "dev:retry": "tsx watch src/workers/retry-scheduler.ts",
     "build": "tsc",
     "kafka:init": "tsx src/workers/kafka-init.ts",
     "start": "node dist/server.js",
