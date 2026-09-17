@@ -11,6 +11,7 @@ import type { EachMessagePayload } from "kafkajs";
 import { kafka } from "../infrastructure/kafka/kafka.js";
 import { KAFKA_TOPICS } from "../infrastructure/kafka/topics.js";
 import { processNotification } from "../modules/notifications/notification.processor.js";
+import { processNotificationEvent } from "../modules/notifications/event.processor.js";
 
 const consumer = kafka.consumer({
   groupId: "notification-worker",
@@ -47,24 +48,7 @@ async function processMessage({
     event,
   });
 
-  if (
-    event.eventType !== "NotificationCreated" &&
-    event.eventType !== "NotificationRetry"
-  ) {
-    console.log(`Ignoring unsupported event type: ${event.eventType}`);
-
-    return;
-  }
-
-  const notificationId = event.payload?.notificationId;
-
-  if (!notificationId) {
-    console.error("NotificationCreated event does not contain notificationId");
-
-    return;
-  }
-
-  await processNotification(notificationId);
+  await processNotificationEvent(event);
 }
 
 async function start() {
