@@ -76,21 +76,23 @@ model Notification {
   category        NotificationCategory
   templateId      String
   templateVersion Int
-  data            Json               @default("{}")
+  data            Json
   status          NotificationStatus   @default(PENDING)
   priority        Int                  @default(0)
 
   scheduledAt DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  nextRetryAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  user               User            @relation(fields: [userId], references: [id])
-  templateVersionRef TemplateVersion @relation(fields: [templateId, templateVersion], references: [templateId, version])
+  user               User               @relation(fields: [userId], references: [id])
+  templateVersionRef TemplateVersion    @relation(fields: [templateId, templateVersion], references: [templateId, version])
   attempts           NotificationAttempt[]
 
   @@index([userId])
   @@index([status])
   @@index([scheduledAt])
+  @@index([nextRetryAt])
 }
 
 model NotificationAttempt {

@@ -10,10 +10,10 @@
 import { prisma } from "../../infrastructure/database/prisma.js";
 import { AppError } from "../../shared/errors/app-error.js";
 
-import { MAX_NOTIFICATION_ATTEMPTS } from "./retry.js";
 import { ProviderError } from "./providers/provider-error.js";
 import { renderTemplate } from "./template-renderer.js";
 import { getNotificationProvider } from "./providers/provider.factory.js";
+import { getNextRetryAt, MAX_NOTIFICATION_ATTEMPTS } from "./retry.js";
 
 export async function processNotification(notificationId: string) {
   // Atomically claim the notification.
@@ -174,13 +174,19 @@ export async function processNotification(notificationId: string) {
     const nextStatus =
       retryable && hasAttemptsRemaining ? "RETRYING" : "FAILED";
 
+    const nextRetryAt =
+      nextStatus === "RETRYING" ? getNextRetryAt(attemptNumber) : null;
+
+    // Record the failed attempt and determine the final notification status.
+    const attemptStatus = nextStatus === "RETRYING" ? "RETRYING" : "FAILED";
+
     await prisma.$transaction([
       prisma.notificationAttempt.create({
         data: {
           notificationId: notification.id,
           attemptNumber,
           provider: "mock-email",
-          status: nextStatus,
+          status: attemptStatus,
           errorCode: isProviderError ? error.code : "UNKNOWN_ERROR",
           errorMessage:
             error instanceof Error
@@ -197,6 +203,7 @@ export async function processNotification(notificationId: string) {
         },
         data: {
           status: nextStatus,
+          nextRetryAt,
         },
       }),
     ]);
@@ -207,6 +214,7 @@ export async function processNotification(notificationId: string) {
       status: nextStatus,
       retryable,
       hasAttemptsRemaining,
+      nextRetryAt,
     });
 
     // The Kafka consumer should acknowledge the message after the

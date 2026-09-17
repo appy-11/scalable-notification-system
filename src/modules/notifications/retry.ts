@@ -15,3 +15,12 @@ export function getRetryDelay(attemptNumber: number): number {
 
   return baseDelay * 2 ** (attemptNumber - 1);
 }
+
+/**
+ * Calculates when the next retry should be attempted.
+ */
+export function getNextRetryAt(attemptNumber: number): Date {
+  const delay = getRetryDelay(attemptNumber);
+
+  return new Date(Date.now() + delay);
+}
